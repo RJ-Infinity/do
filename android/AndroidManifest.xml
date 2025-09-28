@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<manifest
+	xmlns:android="http://schemas.android.com/apk/res/android"
+	package="com.rjinfinity.todo"
+	android:versionCode="1"
+	android:versionName="0.1"
+>
+	<!-- as there is no jvm code has code is false -->
+	<uses-sdk android:minSdkVersion="33"/>
+	<application
+		android:allowBackup="false"
+		android:fullBackupContent="false"
+		android:label="TODO"
+		android:hasCode="false"
+		android:isLightTheme="true"
+	>
+		<activity
+			android:name="android.app.NativeActivity"
+			android:label="TODO"
+			android:configChanges="orientation|keyboardHidden"
+			android:exported="true"
+			android:theme="@style/NoTitle"
+		>
+			<meta-data android:name="android.app.lib_name" android:value="app" />
+			<intent-filter>
+				<action android:name="android.intent.action.MAIN" />
+				<category android:name="android.intent.category.LAUNCHER" />
+			</intent-filter>
+		</activity>
+	</application>
+</manifest>

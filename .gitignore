@@ -1,0 +1,5 @@
+/build
+*.exe
+/deps
+/.vscode
+keystore.jks
