@@ -6,20 +6,17 @@
 #include <assert.h>
 #include "log.h"
 
-#ifdef ANDROID
-#include <android_native_app_glue.h>
-#include <android/set_abort_message.h>
-#include <android/choreographer.h>
-#include <android/window.h>
-#include <android/font_matcher.h>
-#include <jni.h>
-
-#include <EGL/egl.h>
-#include <glad/glad.h>
-
 
 // not sure what renderer i will use with other systems so include them in android only for now
-#define SOKOL_GLES3
+#if defined(ANDROID)
+	// these must be included before sokol
+	#include <EGL/egl.h>
+	#include <glad/glad.h>
+
+	#define SOKOL_GLES3
+#elif defined(_WIN32)
+	#define SOKOL_GLCORE
+#endif
 #define SOKOL_GFX_IMPL
 #include <sokol_gfx.h>
 
@@ -33,46 +30,34 @@
 #include "font_renderer.h"
 #include <shader/text.h>
 
+void panic(const char* fmt, ...);
+
+#if defined(ANDROID)
+#include <android_native_app_glue.h>
+#include <android/set_abort_message.h>
+#include <android/choreographer.h>
+#include <android/window.h>
+#include <android/font_matcher.h>
+#include <jni.h>
+
 typedef struct android_app android_app;
 typedef struct android_poll_source android_poll_source;
 
 #define user_rd(app) ((rendering_data*)((app)->userData))
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
 
-typedef struct{
-	EGLDisplay display;
-	EGLSurface surface;
-	EGLContext context;
-	int framebuffer;
-	int32_t width;
-	int32_t height;
-	float dpi;
-	ARect contentRect;
-	bool running;
-	float pointer_x;
-	float pointer_y;
-	bool pointer;
-	FT_Library library;
-} rendering_data;
 
-void panic(const char* fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	char* buf;
-	if (vasprintf(&buf, fmt, ap) < 0) {
-		android_set_abort_message("failed for format error message");
-	} else {
-		android_set_abort_message(buf);
-		LOG_E("PANIC: %s", buf);
-	}
-	exit(1);
-}
 sg_sampler txt_smp;
 sgl_pipeline txt_pip;
 void sclay_render_text(Clay_RenderCommand *config, sclay_font_context ctx){
-	rendered_str* rs = android_render(
+	rendered_str* rs = render(
 		(FT_Library)ctx,
-		(uint8_t*)config->renderData.text.stringContents.chars,
-		config->renderData.text.stringContents.length,
+		(utf8){
+			(u8*)config->renderData.text.stringContents.chars,
+			config->renderData.text.stringContents.length,
+		},
 		config->renderData.text.fontSize
 	);
 
@@ -128,6 +113,58 @@ void sclay_render_text(Clay_RenderCommand *config, sclay_font_context ctx){
 	sgl_pop_pipeline();
 }
 
+
+Clay_Dimensions measureText(
+	Clay_StringSlice text,
+	Clay_TextElementConfig *config,
+	void *userData
+){
+	TextSize ts = measure(
+		(FT_Library)userData,
+		(utf8){
+			(u8*)text.chars,
+			text.length,
+		},
+		config->fontSize,
+		NULL
+	);
+	return (Clay_Dimensions){
+		.width = ts.width >> 6,
+		.height = ts.height >> 6,
+	};
+}
+
+
+void handle_clay_error(Clay_ErrorData errorText){
+	switch (errorText.errorType){
+		case CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED:{
+			LOG_W("CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED thrown");
+		}break;
+		case CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED:{
+			LOG_W("CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED thrown");
+		}break;
+		case CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED:{
+			LOG_W("CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED thrown");
+		}break;
+		case CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED:{
+			LOG_W("CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED thrown");
+		}break;
+		case CLAY_ERROR_TYPE_DUPLICATE_ID:{
+			LOG_W("CLAY_ERROR_TYPE_DUPLICATE_ID thrown");
+		}break;
+		case CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND:{
+			LOG_W("CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND thrown");
+		}break;
+		case CLAY_ERROR_TYPE_PERCENTAGE_OVER_1:{
+			LOG_W("CLAY_ERROR_TYPE_PERCENTAGE_OVER_1 thrown");
+		}break;
+		case CLAY_ERROR_TYPE_INTERNAL_ERROR:{
+			LOG_W("CLAY_ERROR_TYPE_INTERNAL_ERROR thrown");
+		}break;
+	}
+	panic("unhandlable clay error: %.*s", errorText.errorText.length, errorText.errorText.chars);
+}
+
 void sokol_log(
 	const char* tag,                // always "sg"
 	uint32_t log_level,             // 0=panic, 1=error, 2=warning, 3=info
@@ -137,19 +174,54 @@ void sokol_log(
 	const char* filename_or_null,   // source filename, may be nullptr in release mode
 	void* user_data
 ){
-	int android_log_level;
-	switch (log_level){
-		case 0: android_log_level = ANDROID_LOG_FATAL; break;
-		case 1: android_log_level = ANDROID_LOG_ERROR; break;
-		case 2: android_log_level = ANDROID_LOG_WARN; break;
-		case 3: android_log_level = ANDROID_LOG_INFO; break;
-		default: android_log_level = ANDROID_LOG_INFO; break;
-	}
 	if (message_or_null){
-		LOG(android_log_level, "sokol log `%s` %s:%d", message_or_null, filename_or_null, line_nr);
+		switch (log_level){
+			case 0: LOG_F("sokol log `%s` %s:%d", message_or_null, filename_or_null, line_nr); break;
+			case 1: LOG_E("sokol log `%s` %s:%d", message_or_null, filename_or_null, line_nr); break;
+			case 2: LOG_W("sokol log `%s` %s:%d", message_or_null, filename_or_null, line_nr); break;
+			case 3:
+			default: LOG_I("sokol log `%s` %s:%d", message_or_null, filename_or_null, line_nr); break;
+		}
 	}else{
-		LOG_W("sokol empty log");
+		switch (log_level){
+			case 0: LOG_F("sokol empty log"); break;
+			case 1: LOG_E("sokol empty log"); break;
+			case 2: LOG_W("sokol empty log"); break;
+			case 3:
+			default: LOG_I("sokol empty log"); break;
+		}
 	}
+}
+
+
+#ifdef ANDROID
+typedef struct{
+	EGLDisplay display;
+	EGLSurface surface;
+	EGLContext context;
+	int framebuffer;
+	int32_t width;
+	int32_t height;
+	float dpi;
+	ARect contentRect;
+	bool running;
+	float pointer_x;
+	float pointer_y;
+	bool pointer;
+	FT_Library library;
+} rendering_data;
+
+void panic(const char* fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	char* buf;
+	if (vasprintf(&buf, fmt, ap) < 0) {
+		android_set_abort_message("failed for format error message");
+	} else {
+		android_set_abort_message(buf);
+		LOG_E("PANIC: %s", buf);
+	}
+	exit(1);
 }
 
 bool init_graphics(android_app* app){
@@ -417,54 +489,6 @@ int32_t android_handle_input(android_app* app, AInputEvent* event) {
 	return 0;
 }
 
-void handle_clay_error(Clay_ErrorData errorText){
-	switch (errorText.errorType){
-		case CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED:{
-			LOG_W("CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED thrown");
-		}break;
-		case CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED:{
-			LOG_W("CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED thrown");
-		}break;
-		case CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED:{
-			LOG_W("CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED thrown");
-		}break;
-		case CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED:{
-			LOG_W("CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED thrown");
-		}break;
-		case CLAY_ERROR_TYPE_DUPLICATE_ID:{
-			LOG_W("CLAY_ERROR_TYPE_DUPLICATE_ID thrown");
-		}break;
-		case CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND:{
-			LOG_W("CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND thrown");
-		}break;
-		case CLAY_ERROR_TYPE_PERCENTAGE_OVER_1:{
-			LOG_W("CLAY_ERROR_TYPE_PERCENTAGE_OVER_1 thrown");
-		}break;
-		case CLAY_ERROR_TYPE_INTERNAL_ERROR:{
-			LOG_W("CLAY_ERROR_TYPE_INTERNAL_ERROR thrown");
-		}break;
-	}
-	panic("unhandlable clay error: %.*s", errorText.errorText.length, errorText.errorText.chars);
-}
-
-Clay_Dimensions measureText(
-	Clay_StringSlice text,
-	Clay_TextElementConfig *config,
-	void *userData
-){
-	TextSize ts = android_measure(
-		(FT_Library)userData,
-		(uint8_t*)text.chars,
-		text.length,
-		config->fontSize,
-		NULL
-	);
-	return (Clay_Dimensions){
-		.width = ts.width >> 6,
-		.height = ts.height >> 6,
-	};
-}
-
 // void set_status_bar_colour(android_app* app){
 // 	JNIEnv* env;
 // 	(*app->activity->vm)->AttachCurrentThread(app->activity->vm, &env, NULL);
@@ -541,4 +565,264 @@ void android_main(android_app* app) {
 	deinit_graphics(app->userData);
 	FT_Done_FreeType(rd.library);
 }
-#endif //ANDROID
+#elif defined(_WIN32)
+
+typedef struct {
+	HWND hwnd;
+	HDC device_ctx;
+	HGLRC GL_ctx;
+	GLint framebuffer;
+	FT_Library library;
+} rendering_data;
+
+void panic(const char* fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	size_t len = vsprintf(NULL, fmt, ap);
+	char* buf = malloc(len);
+
+	if (len <= 0 || buf == NULL || vsprintf(buf, fmt, ap) <= 0) {
+		LOG_F("failed for format error message");
+	} else {
+		LOG_F("PANIC: %s", buf);
+	}
+	exit(1);
+}
+
+LRESULT WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
+	// get the user data
+	// GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+
+	switch (uMsg) {
+		case WM_CLOSE: {
+			DestroyWindow(hwnd);
+		} break;
+		case WM_DESTROY: {
+			PostQuitMessage(0);
+		} break;
+		case WM_SIZE: {
+			int width = LOWORD(lParam);
+			int height = HIWORD(lParam);
+		} break;
+		case WM_PAINT: {
+
+		} break;
+		default: {
+			return DefWindowProc(hwnd, uMsg, wParam, lParam);
+		}
+	}
+	return 0;
+}
+
+void tick(HWND hwnd){
+	rendering_data* rd = (rendering_data*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+	if (rd == NULL){return;}
+	RECT size;
+	POINT mouse;
+	assert(GetClientRect(hwnd, &size));
+	assert(GetCursorPos(&mouse));
+
+	sclay_set_layout_dimensions((Clay_Dimensions){
+		(float)(size.right - size.left),
+		(float)(size.bottom - size.top)
+	}, 1);
+	// }, GetDpiForWindow(hwnd));
+	Clay_SetPointerState((Clay_Vector2){
+		(float)(mouse.x - size.left),
+		(float)(mouse.x - size.right),
+	}, GetAsyncKeyState(VK_LBUTTON) & 0x01);
+
+	Clay_RenderCommandArray commands = layout((Clay_Padding){0});
+
+	sg_begin_pass(&(sg_pass){.swapchain = (sg_swapchain){
+		.width = size.right - size.left,
+		.height = size.bottom - size.top,
+		.sample_count = 1,
+		.color_format = SG_PIXELFORMAT_RGBA8,
+		.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL,
+		.gl.framebuffer = rd->framebuffer,
+	}});
+	sgl_matrix_mode_modelview();
+	sgl_load_identity();
+
+	sclay_render(commands);
+
+	sgl_draw();
+	sg_end_pass();
+	sg_commit();
+
+	SwapBuffers(rd->device_ctx);
+}
+
+int main(){
+	WNDCLASSEX wc;
+	wc.cbSize = sizeof(wc);
+	wc.style = CS_OWNDC;
+	wc.lpfnWndProc = WindowProc;
+	wc.cbClsExtra = 0;
+	wc.cbWndExtra = 0;
+	wc.hInstance = GetModuleHandle(NULL);
+	wc.hIcon = LoadIcon(NULL, (LPCWSTR)32512);
+	wc.hCursor = LoadCursor(NULL, (LPCWSTR)32512);
+	wc.hbrBackground = (HBRUSH)1;
+	wc.lpszMenuName = NULL;
+	wc.lpszClassName = L"DO";
+	wc.hIconSm = LoadIcon(NULL, (LPCWSTR)32512);
+
+	if(!RegisterClassEx(&wc)){
+		MessageBox(NULL, L"Window Registration Failed!", L"Error!", 0);
+		return 1;
+	}
+
+	HWND hwnd = CreateWindowEx(
+		WS_EX_CLIENTEDGE,
+		L"DO",
+		L"DO",
+		WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT, CW_USEDEFAULT, 240, 120,
+		NULL, // no parent
+		NULL, // no menu
+		GetModuleHandle(NULL),
+		NULL
+	);
+	
+	if(hwnd == NULL) {
+		MessageBox(NULL, L"Window Creation Failed!", L"Error!", MB_ICONEXCLAMATION | MB_OK);
+		return 1;
+	}
+	
+	rendering_data rd;
+	rd.hwnd = hwnd;
+	rd.device_ctx = GetDC(hwnd);
+
+	PIXELFORMATDESCRIPTOR pfd = {
+		.nSize = sizeof(PIXELFORMATDESCRIPTOR),
+		.nVersion = 1,
+		.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+		.iPixelType = PFD_TYPE_RGBA,
+		.cColorBits = 24,
+		.cDepthBits = 24,
+		.cStencilBits = 8,
+		.iLayerType = PFD_MAIN_PLANE,
+	};
+	int pfn = ChoosePixelFormat(rd.device_ctx, &pfd);
+	assert(pfn);
+	SetPixelFormat(rd.device_ctx, pfn, &pfd);
+
+	rd.GL_ctx = wglCreateContext(rd.device_ctx);
+	wglMakeCurrent(rd.device_ctx, rd.GL_ctx);
+
+	HGLRC (*wglCreateContextAttribsARB)(
+		HDC hDC,
+		HGLRC hShareContext,
+		const int *attribList
+	) = (void*)wglGetProcAddress("wglCreateContextAttribsARB");
+	BOOL (*wglChoosePixelFormatARB)(
+		HDC hdc,
+		const int *piAttribIList,
+		const FLOAT *pfAttribFList,
+		UINT nMaxFormats,
+		int *piFormats,
+		UINT *nNumFormats
+	) = (void*)wglGetProcAddress("wglChoosePixelFormatARB");
+	assert(wglCreateContextAttribsARB && wglChoosePixelFormatARB);
+
+	wglMakeCurrent(rd.device_ctx, NULL);
+	wglDeleteContext(rd.GL_ctx);
+
+	const int attribList[] = {
+		0x2001/*WGL_DRAW_TO_WINDOW_ARB*/, GL_TRUE,
+		0x2010/*WGL_SUPPORT_OPENGL_ARB*/, GL_TRUE,
+		0x2011/*WGL_DOUBLE_BUFFER_ARB*/, GL_TRUE,
+		0x2013/*WGL_PIXEL_TYPE_ARB*/, 0x202B/*WGL_TYPE_RGBA_ARB*/,
+		0x2014/*WGL_COLOR_BITS_ARB*/, 32,
+		0x2022/*WGL_DEPTH_BITS_ARB*/, 24,
+		0x2023/*WGL_STENCIL_BITS_ARB*/, 8,
+		0, // End
+	};
+
+	UINT numFormats;
+	wglChoosePixelFormatARB(rd.device_ctx, attribList, NULL, 1, &pfn, &numFormats);
+
+	DescribePixelFormat(rd.device_ctx, pfn, sizeof(pfd), &pfd);
+	SetPixelFormat(rd.device_ctx, pfn, &pfd);
+
+	int iContextAttribs[] = {
+		0x2091/*WGL_CONTEXT_MAJOR_VERSION_ARB*/, 3,
+		0x2092/*WGL_CONTEXT_MINOR_VERSION_ARB*/, 1,
+		0x2094/*WGL_CONTEXT_FLAGS_ARB*/, 0x00000002/*WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB*/,
+		0
+	};
+
+	rd.GL_ctx = wglCreateContextAttribsARB(rd.device_ctx, 0, iContextAttribs);
+	wglMakeCurrent(rd.device_ctx, rd.GL_ctx);
+
+
+
+
+	FT_Error error = FT_Init_FreeType(&rd.library);
+	assert(!error);
+
+	size_t clayMemReq = Clay_MinMemorySize();
+	Clay_Arena arena = Clay_CreateArenaWithCapacityAndMemory(clayMemReq, malloc(clayMemReq));
+
+	Clay_Initialize(arena, (Clay_Dimensions) { 0, 0 }, (Clay_ErrorHandler){handle_clay_error});
+	
+	Clay_SetMeasureTextFunction(measureText, rd.library);
+	sclay_set_font_ctx(rd.library);
+
+
+
+
+	sg_desc sokol_desc = {0};
+	
+	sokol_desc.logger.func = sokol_log;
+	sokol_desc.environment.defaults.color_format = SG_PIXELFORMAT_RGBA8;
+	sokol_desc.environment.defaults.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+	sokol_desc.environment.defaults.sample_count = 1;
+	sg_setup(&sokol_desc);
+	
+	printf("setup sgl\n");
+
+	sgl_desc_t sgl_desc = {0};
+	sgl_desc.color_format = SG_PIXELFORMAT_RGBA8;
+	sgl_desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+	sgl_desc.sample_count = 1;
+
+	sgl_setup(&sgl_desc);
+
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &rd.framebuffer);
+
+	printf("setup sclay\n");
+	sclay_setup();
+
+	// set some custom userdata
+	SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)&rd);
+
+	printf("show window\n");
+	//TODO: make this an option
+	ShowWindow(hwnd, SW_MAXIMIZE);
+	// ShowWindow(hwnd, 1);
+	UpdateWindow(hwnd);
+	
+	printf("start loop\n");
+	MSG msg;
+	while (true){
+		if (GetMessage(&msg, NULL, 0, 0) == -1){
+			MessageBox(NULL, L"Get Message Failed", L"Error!", MB_ICONEXCLAMATION | MB_OK);
+			break;
+		}
+		if (msg.message == WM_QUIT){ break; }
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+		
+		tick(hwnd);
+	}
+
+	wglMakeCurrent(rd.device_ctx, NULL);
+	wglDeleteContext(rd.GL_ctx);
+
+	return 0;
+}
+int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd){return main();}
+#endif

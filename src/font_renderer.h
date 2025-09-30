@@ -27,26 +27,7 @@ void TextBitmap_destroy(TextBitmap tb){
 	free(tb.buf);
 }
 
-// fn void render_bitmap(Olivec_Canvas oc, TextBitmap text, usz baseline_left, usz baseline_y, Un32 colour){
-// 	// TODO: dont ignore colour alpha
-// 	Un32 fr = olive::olivec_red(colour);
-// 	Un32 fg = olive::olivec_green(colour);
-// 	Un32 fb = olive::olivec_blue(colour);
-// 	Un32 fa = olive::olivec_alpha(colour);
-// 	for (usz i = 0; i < text.size.height>>6; i++) {
-// 		for (usz j = 0; j < text.size.width>>6; j++){
-// 			isz x = j + baseline_left;
-// 			isz y = i+baseline_y-(usz)(text.size.height-text.size.baseline)>>6;
-// 			if (x<0 || x>=oc.width || y<0 || y>=oc.height){continue;}
-// 			olive::olivec_blend_color(
-// 				&oc.pixels[y*oc.stride + x],
-// 				olive::olivec_rgba(fr, fg, fb, text.buf[i * (usz)(text.size.width>>6) + j])
-// 			);
-// 		}
-// 	}
-// }
-
-TextSize render_text(FT_Face face, uint8_t* text, size_t text_len, TextBitmap* image, FT_Pos offset){
+TextSize render_text(FT_Face face, utf8 text, TextBitmap* image, FT_Pos offset){
 	FT_GlyphSlot slot = face->glyph;
 	bool has_kerning = (bool)(face->face_flags & FT_FACE_FLAG_KERNING);
 	
@@ -66,31 +47,31 @@ TextSize render_text(FT_Face face, uint8_t* text, size_t text_len, TextBitmap* i
 	FT_Long max_pos = 0;
 	FT_ULong lastglyph;
 	
-	for (int n = 0; n < text_len;) {
+	for (int n = 0; n < text.len;) {
 		FT_ULong utf8char;
-		if (text[n] >> 3 == 0b11110){
-			FT_ULong b1 = text[n];
+		if (text.chars[n] >> 3 == 0b11110){
+			FT_ULong b1 = text.chars[n];
 			n++;
-			FT_ULong b2 = text[n];
+			FT_ULong b2 = text.chars[n];
 			n++;
-			FT_ULong b3 = text[n];
+			FT_ULong b3 = text.chars[n];
 			n++;
-			FT_ULong b4 = text[n];
+			FT_ULong b4 = text.chars[n];
 			utf8char = (b1&0b111)<<18 | (b2&0b111111)<<12 | (b3&0b111111)<<6 | (b4&0b111111);
-		}else if (text[n] >> 4 == 0b1110){
-			FT_ULong b1 = text[n];
+		}else if (text.chars[n] >> 4 == 0b1110){
+			FT_ULong b1 = text.chars[n];
 			n++;
-			FT_ULong b2 = text[n];
+			FT_ULong b2 = text.chars[n];
 			n++;
-			FT_ULong b3 = text[n];
+			FT_ULong b3 = text.chars[n];
 			utf8char = (b1&0b1111)<<12 | (b2&0b111111)<<6 | (b3&0b111111);
-		}else if (text[n] >> 5 == 0b110){
-			FT_ULong b1 = text[n];
+		}else if (text.chars[n] >> 5 == 0b110){
+			FT_ULong b1 = text.chars[n];
 			n++;
-			FT_ULong b2 = text[n];
+			FT_ULong b2 = text.chars[n];
 			utf8char = (b1&0b11111)<<6 | (b2&0b111111);
 		}else{
-			utf8char = text[n];
+			utf8char = text.chars[n];
 		}
 		n++;
 		
@@ -164,14 +145,90 @@ TextSize render_text(FT_Face face, uint8_t* text, size_t text_len, TextBitmap* i
 	};
 }
 
-#ifdef ANDROID
+#if defined(ANDROID)
 #include <android/font_matcher.h>
+
+typedef AFontMatcher* font_matching_data;
+typedef struct{
+	size_t index;
+	const char* file;
+	AFont* _font;
+} matched_font;
+
+font_matching_data matcher_init(){return AFontMatcher_create();}
+
+matched_font match_font(
+	font_matching_data matcher,
+	const char* family,
+	utf16 text,
+	size_t* run_length
+){
+	AFont* font = AFontMatcher_match(
+		matcher,
+		"sans-serif",
+		text.chars,
+		text.len,
+		(uint32_t*)run_length
+	);
+
+	return (matched_font){
+		AFont_getCollectionIndex(font),
+		AFont_getFontFilePath(font),
+		font
+	};
+}
+
+void close_font(matched_font font){
+	AFont_close(font._font);
+}
+
+#elif defined(_WIN32)
+#include <windows.h>
+
+typedef void* font_matching_data;
+typedef struct{
+	size_t index;
+	const char* file;
+} matched_font;
+
+font_matching_data matcher_init(){return NULL;}
+
+matched_font match_font(
+	font_matching_data matcher,
+	const char* family,
+	utf16 text,
+	size_t* run_length
+){
+	// LOGFONT lf;
+	// lf.lfCharSet = ANSI_CHARSET;
+
+
+	// lf.lfCharSet = ANSI_CHARSET;
+
+	// EnumFontFamiliesEx(
+	// 	GetDC(NULL),
+
+	// )
+
+	*run_length = text.len;
+
+	return (matched_font){
+		0,
+		"C:\\windows\\fonts\\arialbd.ttf"
+	};
+
+}
+
+void close_font(matched_font font){
+
+}
+
+#endif
+
 #define RENDERED_CACHE_SIZE 50
 
-
 typedef struct {
-	uint8_t* str;
-	size_t len;
+	utf8 str;
 	uint64_t hash;
 	sg_image img;
 	sg_view view;
@@ -203,48 +260,44 @@ uint64_t hash(uint8_t* str, size_t len) {
 typedef struct font_run font_run;
 struct font_run{
 	FT_Face face;
-	uint32_t len;
+	size_t len;
 	font_run* next;
 };
-TextSize android_measure(
+
+TextSize measure(
 	FT_Library lib,
-	uint8_t* str,
-	size_t len,
+	utf8 str,
 	FT_UInt font_size,
 	font_run* faces
 ) {
-	assert(len > 0);
+	assert(str.len > 0);
 	utf16 text = {0};
-	text.len = utf8_to_utf16((utf8){str, len}, text);
+	text.len = utf8_to_utf16(str, text);
 	text.chars = malloc(text.len*sizeof(text.chars[0]));
 	void* chars = text.chars;
-	utf8_to_utf16((utf8){str, len}, text);
-	AFontMatcher* matcher = AFontMatcher_create();
-	assert(matcher);
+	utf8_to_utf16(str, text);
+	font_matching_data matcher = matcher_init();
 	TextSize size = {0};
 	font_run* face = faces;
 	if (face == NULL){face = calloc(1, sizeof(*face));}
 	while (true) {
-		AFont* font = AFontMatcher_match(
+		matched_font font = match_font(
 			matcher,
 			"sans-serif",
-			text.chars,
-			text.len,
+			text,
 			&face->len
 		);
 		assert(face->len > 0);
-		size_t font_index = AFont_getCollectionIndex(font);
-		const char* font_file = AFont_getFontFilePath(font);
-		
+
 		//TODO: cache fonts
-		FT_Error err = FT_New_Face(lib, font_file, font_index, &face->face);
+		FT_Error err = FT_New_Face(lib, font.file, font.index, &face->face);
 		assert(!err);
-		
+
 		err = FT_Set_Pixel_Sizes(face->face, font_size, font_size);
 		assert(!err);
-		size = addTextSize(size, render_text(face->face, str, len, NULL, 0));
+		size = addTextSize(size, render_text(face->face, str, NULL, 0));
 		
-		AFont_close(font);
+		close_font(font);
 		
 		text.len -= face->len;
 		text.chars += face->len;
@@ -265,14 +318,18 @@ TextSize android_measure(
 	}
 	return size;
 }
-rendered_str* android_render(FT_Library lib, uint8_t* str, size_t len, FT_UInt font_size) {
+rendered_str* render(FT_Library lib, utf8 str, FT_UInt font_size) {
 	rendered_str* rv = NULL;
 	for (rendered_str* i = rendered_cache; i < rendered_cache+RENDERED_CACHE_SIZE; i++) {
 		if (!i->alive){
 			if (rv == NULL){rv = i;}
 			continue;
 		}
-		if (i->str == str && i->len == len && i->hash == hash(str, len)){
+		if (
+			i->str.chars == str.chars &&
+			i->str.len == str.len &&
+			i->hash == hash(str.chars, str.len)
+		){
 			i->alive = true;
 			if (
 				sg_query_view_state(i->view) == SG_RESOURCESTATE_VALID &&
@@ -289,7 +346,7 @@ rendered_str* android_render(FT_Library lib, uint8_t* str, size_t len, FT_UInt f
 	// acctualy render the string
 	font_run faces[2] = {0};
 	faces[0].next = &faces[1];
-	TextBitmap tb = createTextBitmap(android_measure(lib, str, len, font_size, faces));
+	TextBitmap tb = createTextBitmap(measure(lib, str, font_size, faces));
 	FT_Pos offset = 0;
 	for(
 		font_run* face = faces;
@@ -298,7 +355,7 @@ rendered_str* android_render(FT_Library lib, uint8_t* str, size_t len, FT_UInt f
 	){
 		FT_Error err = FT_Set_Pixel_Sizes(face->face, font_size, font_size);
 		assert(!err);
-		offset += render_text(face->face, str, len, &tb, offset).width;
+		offset += render_text(face->face, str, &tb, offset).width;
 	}
 
 
@@ -315,9 +372,10 @@ rendered_str* android_render(FT_Library lib, uint8_t* str, size_t len, FT_UInt f
 		.texture.image = rv->img,
 	});
 	rv->str = str;
-	rv->len = len;
-	rv->hash = hash(str, len);
+	rv->hash = hash(str.chars, str.len);
 	rv->alive = true;
+
+	TextBitmap_destroy(tb);
 
 	font_run* face = faces;
 	while (face != NULL){
@@ -330,5 +388,3 @@ rendered_str* android_render(FT_Library lib, uint8_t* str, size_t len, FT_UInt f
 
 	return rv;
 }
-
-#endif

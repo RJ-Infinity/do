@@ -5,7 +5,7 @@ $ENV:ANDROID_SYSROOT = "$ENV:ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/windows-x
 $PACKAGE = "com.rjinfinity.todo"
 
 
-.\sokol-shdc.exe --input .\src\text.glsl --output .\build\include\shader\text.h --slang glsl300es
+.\sokol-shdc.exe --input .\src\text.glsl --output .\build\android\include\shader\text.h --slang glsl300es
 
 &$ENV:ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/bin/clang `
 --target=aarch64-linux-android33 `
@@ -24,7 +24,7 @@ $PACKAGE = "com.rjinfinity.todo"
 -Werror=format-security `
 -fno-limit-debug-info `
 -fPIC `
--o ./build/obj/android_native_app_glue.c.o `
+-o ./build/android/obj/android_native_app_glue.c.o `
 -c $ENV:ANDROID_NDK_ROOT/sources/android/native_app_glue/android_native_app_glue.c
 
 $freetype_files =
@@ -77,7 +77,7 @@ $files = "./src/main.c", "./src/layout.c", "./deps/glad.c"
 $files += $freetype_files | ForEach-Object {"./deps/freetype/src/"+$_}
 
 foreach ($file in $files){
-	$out_file = "./build/obj/$file.o"
+	$out_file = "./build/android/obj/$file.o"
 	$file_time = (Get-Item $file).LastWriteTime
 	try{
 		$out_file_time = (Get-Item $out_file).LastWriteTime
@@ -89,14 +89,14 @@ foreach ($file in $files){
 
 	echo compiling $file
 
-	md -Force $(Split-Path ./build/obj/$file) > $null
+	md -Force $(Split-Path ./build/android/obj/$file) > $null
 	$cargs = @()
 	$cargs += "--target=aarch64-linux-android33"
 	$cargs += "--sysroot=$ENV:ANDROID_SYSROOT"
 	$cargs += "-Dnative_activity_EXPORTS"
 	$cargs += "-I$ENV:ANDROID_NDK_ROOT/sources/android/native_app_glue"
 	$cargs += "-I./deps/"
-	$cargs += "-I./build/include/"
+	$cargs += "-I./build/android/include/"
 	$cargs += "-I./deps/freetype/include"
 	$cargs += "-g"
 	$cargs += "-DANDROID"
@@ -123,9 +123,9 @@ foreach ($file in $files){
 	(Get-Item $out_file).LastWriteTime = $file_time
 }
 
-&$ENV:ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar qc ./build/obj/libandroid_native_app_glue.a ./build/obj/android_native_app_glue.c.o
+&$ENV:ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar qc ./build/android/obj/libandroid_native_app_glue.a ./build/android/obj/android_native_app_glue.c.o
 
-&$ENV:ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib ./build/obj/libandroid_native_app_glue.a
+&$ENV:ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ranlib ./build/android/obj/libandroid_native_app_glue.a
 
 
 $linker_args = @()
@@ -136,7 +136,7 @@ $linker_args += "--hash-style=gnu"
 $linker_args += "--eh-frame-hdr"
 $linker_args += "-m", "aarch64linux"
 $linker_args += "-shared"
-$linker_args += "-o", "./build/pkg/lib/arm64-v8a/libapp.so"
+$linker_args += "-o", "./build/android/pkg/lib/arm64-v8a/libapp.so"
 $linker_args += "$ENV:ANDROID_SYSROOT/usr/lib/aarch64-linux-android/33/crtbegin_so.o"
 $linker_args += "-u", "ANativeActivity_onCreate"
 $linker_args += "-L$ENV:ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/19/lib/linux/aarch64"
@@ -151,10 +151,10 @@ $linker_args += "--fatal-warnings"
 $linker_args += "--no-undefined"
 $linker_args += "-soname", "libapp.so"
 foreach ($file in $files){
-	$linker_args += "./build/obj/$file.o"
+	$linker_args += "./build/android/obj/$file.o"
 }
 $linker_args += "-landroid"
-$linker_args += "./build/obj/libandroid_native_app_glue.a"
+$linker_args += "./build/android/obj/libandroid_native_app_glue.a"
 $linker_args += "-lEGL"
 $linker_args += "-lGLESv1_CM"
 $linker_args += "-llog"
@@ -175,13 +175,13 @@ $linker_args += "$ENV:ANDROID_SYSROOT/usr/lib/aarch64-linux-android/33/crtend_so
 
 &$ENV:ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/bin/ld.lld $linker_args
 
-&$ENV:ANDROID_SDK_ROOT/build-tools/36.0.0/aapt package -f --debug-mode -M ./android/AndroidManifest.xml -S ./android/res -I $ENV:ANDROID_SDK_ROOT/platforms/android-34/android.jar -F ./build/apk/$PACKAGE.unsigned.apk ./build/pkg/
+&$ENV:ANDROID_SDK_ROOT/build-tools/36.0.0/aapt package -f --debug-mode -M ./android/AndroidManifest.xml -S ./android/res -I $ENV:ANDROID_SDK_ROOT/platforms/android-34/android.jar -F ./build/android/apk/$PACKAGE.unsigned.apk ./build/android/pkg/
 
-&$ENV:ANDROID_SDK_ROOT/build-tools/36.0.0/zipalign -f -p 4 ./build/apk/$PACKAGE.unsigned.apk ./build/apk/$PACKAGE.aligned.apk
+&$ENV:ANDROID_SDK_ROOT/build-tools/36.0.0/zipalign -f -p 4 ./build/android/apk/$PACKAGE.unsigned.apk ./build/android/apk/$PACKAGE.aligned.apk
 
-&$ENV:ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner.bat sign --ks ./keystore.jks --ks-key-alias androidkey --ks-pass pass:android --key-pass pass:android --out ./build/apk/$PACKAGE.apk ./build/apk/$PACKAGE.aligned.apk
+&$ENV:ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner.bat sign --ks ./keystore.jks --ks-key-alias androidkey --ks-pass pass:android --key-pass pass:android --out ./build/android/apk/$PACKAGE.apk ./build/android/apk/$PACKAGE.aligned.apk
 
-adb install -r .\build\apk\$PACKAGE.apk
+adb install -r ./build/android/apk/$PACKAGE.apk
 
 adb shell am start -n $PACKAGE/android.app.NativeActivity
 
