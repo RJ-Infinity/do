@@ -27,6 +27,9 @@
 #define SOKOL_CLAY_IMPL
 #include <sokol_clay.h>
 
+#define RJ_STRINGS_IMPL
+#include "unicode.h"
+#define RJ_FONT_RENDERER_IMPL
 #include "font_renderer.h"
 #include <shader/text.h>
 
@@ -401,7 +404,7 @@ void tick(rendering_data* rd) {
 		.top = rd->contentRect.top,
 		.right = rd->width - rd->contentRect.right,
 		.bottom = rd->height - rd->contentRect.bottom,
-	});
+	}, get_things());
 
 	sg_begin_pass(&(sg_pass){.swapchain = (sg_swapchain){
 		.width = rd->width,
@@ -622,6 +625,11 @@ void tick(HWND hwnd){
 	assert(GetClientRect(hwnd, &size));
 	assert(GetCursorPos(&mouse));
 
+	if (
+		size.right - size.left == 0 ||
+		size.bottom - size.top == 0
+	){return;}
+
 	sclay_set_layout_dimensions((Clay_Dimensions){
 		(float)(size.right - size.left),
 		(float)(size.bottom - size.top)
@@ -632,7 +640,7 @@ void tick(HWND hwnd){
 		(float)(mouse.x - size.right),
 	}, GetAsyncKeyState(VK_LBUTTON) & 0x01);
 
-	Clay_RenderCommandArray commands = layout((Clay_Padding){0});
+	Clay_RenderCommandArray commands = layout((Clay_Padding){0}, get_things());
 
 	sg_begin_pass(&(sg_pass){.swapchain = (sg_swapchain){
 		.width = size.right - size.left,

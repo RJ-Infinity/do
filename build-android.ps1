@@ -73,7 +73,7 @@ $freetype_files =
 "psnames/psnames.c",
 "svg/ftsvg.c"
 
-$files = "./src/main.c", "./src/layout.c", "./deps/glad.c"
+$files = "./src/main.c", "./src/layout.c", "./deps/glad.c", "./src/thing.c"
 $files += $freetype_files | ForEach-Object {"./deps/freetype/src/"+$_}
 
 foreach ($file in $files){

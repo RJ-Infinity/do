@@ -1,5 +1,6 @@
+#ifndef _RJ_FONT_RENDERER
+#define _RJ_FONT_RENDERER
 #include <freetype/freetype.h>
-#define RJ_STRINGS_IMPL
 #include "unicode.h"
 
 #define max(a, b) (((a) > (b)) ? (a) : (b))
@@ -16,6 +17,68 @@ typedef struct TextBitmap{
 	size_t buf_len;
 	TextSize size;
 } TextBitmap;
+
+TextBitmap createTextBitmap(TextSize size);
+void TextBitmap_destroy(TextBitmap tb);
+TextSize render_text(FT_Face face, utf8 text, TextBitmap* image, FT_Pos offset);
+
+#if defined(ANDROID)
+#include <android/font_matcher.h>
+
+typedef AFontMatcher* font_matching_data;
+typedef struct{
+	size_t index;
+	const char* file;
+	AFont* _font;
+} matched_font;
+#elif defined(_WIN32)
+#include <windows.h>
+
+typedef void* font_matching_data;
+typedef struct{
+	size_t index;
+	const char* file;
+} matched_font;
+#endif
+
+font_matching_data matcher_init();
+
+matched_font match_font(
+	font_matching_data matcher,
+	const char* family,
+	utf16 text,
+	size_t* run_length
+);
+
+void close_font(matched_font font);
+
+typedef struct {
+	utf8 str;
+	uint64_t hash;
+	sg_image img;
+	sg_view view;
+	bool alive;
+} rendered_str;
+
+typedef struct font_run font_run;
+struct font_run{
+	FT_Face face;
+	size_t len;
+	font_run* next;
+};
+
+TextSize measure(
+	FT_Library lib,
+	utf8 str,
+	FT_UInt font_size,
+	font_run* faces
+);
+rendered_str* render(FT_Library lib, utf8 str, FT_UInt font_size);
+
+#endif // _RJ_FONT_RENDERER
+#ifdef RJ_FONT_RENDERER_IMPL
+#undef RJ_FONT_RENDERER_IMPL
+
 TextBitmap createTextBitmap(TextSize size){
 	TextBitmap tb;
 	tb.buf_len = (size_t)((size.width>>6)*(size.height>>6));
@@ -146,14 +209,6 @@ TextSize render_text(FT_Face face, utf8 text, TextBitmap* image, FT_Pos offset){
 }
 
 #if defined(ANDROID)
-#include <android/font_matcher.h>
-
-typedef AFontMatcher* font_matching_data;
-typedef struct{
-	size_t index;
-	const char* file;
-	AFont* _font;
-} matched_font;
 
 font_matching_data matcher_init(){return AFontMatcher_create();}
 
@@ -183,14 +238,6 @@ void close_font(matched_font font){
 }
 
 #elif defined(_WIN32)
-#include <windows.h>
-
-typedef void* font_matching_data;
-typedef struct{
-	size_t index;
-	const char* file;
-} matched_font;
-
 font_matching_data matcher_init(){return NULL;}
 
 matched_font match_font(
@@ -227,14 +274,6 @@ void close_font(matched_font font){
 
 #define RENDERED_CACHE_SIZE 50
 
-typedef struct {
-	utf8 str;
-	uint64_t hash;
-	sg_image img;
-	sg_view view;
-	bool alive;
-} rendered_str;
-
 rendered_str rendered_cache[RENDERED_CACHE_SIZE] = {0};
 
 /*FORCE_INLINE*/ TextSize addTextSize(TextSize lhs, TextSize rhs){
@@ -256,13 +295,6 @@ uint64_t hash(uint8_t* str, size_t len) {
 	}
 	return hash;
 }
-
-typedef struct font_run font_run;
-struct font_run{
-	FT_Face face;
-	size_t len;
-	font_run* next;
-};
 
 TextSize measure(
 	FT_Library lib,
@@ -388,3 +420,4 @@ rendered_str* render(FT_Library lib, utf8 str, FT_UInt font_size) {
 
 	return rv;
 }
+#endif // RJ_FONT_RENDERER_IMPL

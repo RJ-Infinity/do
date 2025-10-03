@@ -35,8 +35,9 @@ size_t utf8_to_utf16(utf8 in, utf16 out);
 size_t utf8_glyph_count(utf8 text);
 size_t utf16_glyph_count(utf16 text);
 size_t utf32_glyph_count(utf32 text);
-
+#endif // _RJ_STRINGS
 #ifdef RJ_STRINGS_IMPL
+#undef RJ_STRINGS_IMPL
 
 #ifdef RJ_ASSERT
 	#define assert RJ_ASSERT
@@ -177,8 +178,7 @@ size_t utf16_glyph_count(utf16 text){
 	assert(0 && "NOT IMPLIMENTED");
 	return 0;
 }
-FORCE_INLINE size_t utf32_glyph_count(utf32 text){return text.len;}
+/*FORCE_INLINE*/ size_t utf32_glyph_count(utf32 text){return text.len;}
 
 
 #endif // RJ_STRINGS_IMPL
-#endif // _RJ_STRINGS
