@@ -111,32 +111,9 @@ TextSize render_text(FT_Face face, utf8 text, TextBitmap* image, FT_Pos offset){
 	FT_ULong lastglyph;
 	
 	for (int n = 0; n < text.len;) {
-		FT_ULong utf8char;
-		if (text.chars[n] >> 3 == 0b11110){
-			FT_ULong b1 = text.chars[n];
-			n++;
-			FT_ULong b2 = text.chars[n];
-			n++;
-			FT_ULong b3 = text.chars[n];
-			n++;
-			FT_ULong b4 = text.chars[n];
-			utf8char = (b1&0b111)<<18 | (b2&0b111111)<<12 | (b3&0b111111)<<6 | (b4&0b111111);
-		}else if (text.chars[n] >> 4 == 0b1110){
-			FT_ULong b1 = text.chars[n];
-			n++;
-			FT_ULong b2 = text.chars[n];
-			n++;
-			FT_ULong b3 = text.chars[n];
-			utf8char = (b1&0b1111)<<12 | (b2&0b111111)<<6 | (b3&0b111111);
-		}else if (text.chars[n] >> 5 == 0b110){
-			FT_ULong b1 = text.chars[n];
-			n++;
-			FT_ULong b2 = text.chars[n];
-			utf8char = (b1&0b11111)<<6 | (b2&0b111111);
-		}else{
-			utf8char = text.chars[n];
-		}
-		n++;
+		codepoint_return gr = codepoint_from_utf8((utf8){&text.chars[n], text.len-n});
+		FT_ULong utf8char = gr.codepoint;
+		n += gr.consumed;
 		
 		FT_UInt glyph = FT_Get_Char_Index(face, utf8char);
 		
